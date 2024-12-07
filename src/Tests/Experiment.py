@@ -8,6 +8,7 @@ class ExperimentResult:
     """Class to store results of a single experiment"""
     main_channel_utilization: float
     reserve_channel_utilization: float 
+    transmission_times: List[float]
     avg_transmission_time: float
     avg_queue_length: float
     failure_rate: float
@@ -53,7 +54,10 @@ class ExperimentRunner:
         main_utilization = len(main_messages) / total_messages if total_messages > 0 else 0
         reserve_utilization = len(reserve_messages) / total_messages if total_messages > 0 else 0
         
-        transmission_times = [msg.get_transmission_time() for msg in main_messages + reserve_messages]
+        transmission_times = [
+                            msg.get_transmission_time()
+                            for msg in main_messages + reserve_messages if msg.transmitted
+                            ]
         avg_transmission = np.mean(transmission_times) if transmission_times else 0
         
         failure_times = [
@@ -65,6 +69,7 @@ class ExperimentRunner:
         return ExperimentResult(
             main_channel_utilization=main_utilization,
             reserve_channel_utilization=reserve_utilization, 
+            transmission_times=transmission_times,
             avg_transmission_time=avg_transmission,
             avg_queue_length=model.queue.max_length,
             failure_rate=failure_rate 

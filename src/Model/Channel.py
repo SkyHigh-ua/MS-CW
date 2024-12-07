@@ -7,6 +7,8 @@ class ChannelState(Enum):
     FREE = 1
     BUSY = 2
     FAILED = 3
+    SHUTTING_DOWN = 4
+    OFF = 5
 
 class Channel:
     """Class representing transmission channel"""
@@ -22,6 +24,10 @@ class Channel:
         self.total_busy_time = 0
         self.last_state_change = 0
         
+    def is_on(self) -> bool:
+        """Check if channel is on"""
+        return self.state == ChannelState.FREE or self.state == ChannelState.BUSY
+        
     def is_free(self) -> bool:
         """Check if channel is free"""
         return self.state == ChannelState.FREE
@@ -29,24 +35,30 @@ class Channel:
     def is_busy(self) -> bool:
         """Check if channel is busy"""
         return self.state == ChannelState.BUSY
+    
+    def is_off(self) -> bool:
+        """Check if channel is off"""
+        return self.state == ChannelState.OFF
         
     def start_transmission(self, message: Message, current_time: float,
                          transmission_time: float):
         """Start message transmission"""
         self.state = ChannelState.BUSY
         self.current_message = message
-        message.transmission_start = current_time
         self.transmission_end = current_time + transmission_time
         self._update_statistics(current_time)
         
     def complete_transmission(self, current_time: float):
         """Complete current transmission"""
         if self.current_message:
-            self.current_message.transmission_end = current_time
+            self.current_message.transmission_end = self.transmission_end
             self.current_message.transmitted = True
             self.messages_processed.append(self.current_message)
-            
-        self.state = ChannelState.FREE
+        
+        if self.state == ChannelState.SHUTTING_DOWN:
+            self.state = ChannelState.OFF
+        else:
+            self.state = ChannelState.FREE
         self.current_message = None
         self.transmission_end = float('inf')
         self._update_statistics(current_time)
@@ -64,6 +76,13 @@ class Channel:
         self.state = ChannelState.FAILED
         self._update_statistics(current_time)
         
+    def turn_off(self, current_time: float):
+        if self.current_message:
+            self.state = ChannelState.SHUTTING_DOWN
+        else:
+            self.state = ChannelState.OFF
+        self._update_statistics(current_time)
+    
     def schedule_recovery(self, recovery_time: float):
         """Schedule channel recovery"""
         self.recovery_time = recovery_time

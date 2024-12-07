@@ -14,6 +14,11 @@ class Queue:
         self.messages.append(message)
         self.max_length = max(self.max_length, len(self.messages))
         
+    def put_first(self, message: Message):
+        """Add message to the start of the queue"""
+        self.messages.appendleft(message)
+        self.max_length = max(self.max_length, len(self.messages))  
+        
     def get(self) -> Optional[Message]:
         """Get next message from queue"""
         if self.messages:

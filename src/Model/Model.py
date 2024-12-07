@@ -31,6 +31,7 @@ class Model:
         
         self.next_message = self._generate_arrival_time()
         self.next_failure = self._generate_failure_time()
+        self.next_reserve = float('inf')
         
     def run(self):
         """Run simulation"""
@@ -38,6 +39,7 @@ class Model:
             next_time = min(
                 self.next_message,
                 self.next_failure,
+                self.next_reserve,
                 self.main_channel.transmission_end,
                 self.main_channel.recovery_time,
                 self.reserve_channel.transmission_end
@@ -51,6 +53,9 @@ class Model:
             if self.current_time == self.next_failure:
                 self._process_channel_failure()
                 
+            if self.current_time == self.next_reserve:
+                self._process_reserve_activation()
+            
             if self.current_time == self.main_channel.recovery_time:
                 self._process_channel_recovery()
                 
@@ -67,6 +72,7 @@ class Model:
         next_time = min(
             self.next_message,
             self.next_failure,
+            self.next_reserve,
             self.main_channel.transmission_end,
             self.main_channel.recovery_time,
             self.reserve_channel.transmission_end
@@ -79,6 +85,9 @@ class Model:
             
         if self.current_time == self.next_failure:
             self._process_channel_failure()
+
+        if self.current_time == self.next_reserve:
+            self._process_reserve_activation()
             
         if self.current_time == self.main_channel.recovery_time:
             self._process_channel_recovery()
@@ -93,10 +102,18 @@ class Model:
         """Process new message arrival"""
         message = Message(arrival_time=self.current_time)
         self.messages_generated += 1
+        message.transmission_start = self.current_time
         
         if self.main_channel.is_free():
+            if self.reserve_channel.is_on():
+                self.reserve_channel.turn_off(self.current_time)
             transmission_time = self._generate_transmission_time()
             self.main_channel.start_transmission(
+                message, self.current_time, transmission_time
+            )
+        elif self.reserve_channel.is_free():
+            transmission_time = self._generate_transmission_time()
+            self.reserve_channel.start_transmission(
                 message, self.current_time, transmission_time
             )
         else:
@@ -112,28 +129,30 @@ class Model:
         if self.main_channel.is_busy():
              
             message = self.main_channel.interrupt(self.current_time)
-            
-             
             if message:
-                transmission_time = self._generate_transmission_time()
-                self.reserve_channel.start_transmission(
-                    message, self.current_time, transmission_time
-                )
+                message.transmission_start = self.current_time
+                self.queue.put_first(message)
+            
+        self.next_reserve = self.current_time + 2
         
         self.main_channel.fail(self.current_time)
         
-         
         recovery_time = self._generate_recovery_time()
         self.main_channel.schedule_recovery(self.current_time + recovery_time)
         
-         
-        self.next_failure = self.current_time + self._generate_failure_time()
+        self.next_failure = float('inf')
+        
+    def _process_reserve_activation(self):
+        """Process reserve channel activation"""
+        self.reserve_channel.recover(self.current_time)
+        
+        self.next_reserve = float('inf')
         
     def _process_channel_recovery(self):
         """Process main channel recovery"""
         self.main_channel.recover(self.current_time)
+        self.next_failure = self.current_time + self._generate_failure_time()
         
-         
         if self.queue:
             message = self.queue.get()
             if message:
@@ -159,27 +178,43 @@ class Model:
         """Process reserve channel transmission completion"""
         self.reserve_channel.complete_transmission(self.current_time)
         
+        if self.queue:
+            message = self.queue.get()
+            if message:
+                transmission_time = self._generate_transmission_time()
+                self.reserve_channel.start_transmission(
+                    message, self.current_time, transmission_time
+                )
+        
     def _generate_arrival_time(self) -> float:
         """Generate message inter-arrival time"""
-        return np.random.normal(self.message_arrival_mean, self.message_arrival_std)
+        return np.random.uniform(self.message_arrival_mean, self.message_arrival_std)
     
     def _generate_transmission_time(self) -> float:
         """Generate message transmission time"""
-        return np.random.normal(self.message_transmission_mean, self.message_transmission_std)
+        return np.random.uniform(self.message_transmission_mean, self.message_transmission_std)
     
     def _generate_failure_time(self) -> float:
         """Generate time until next failure"""
-        return np.random.normal(self.failure_interval_mean, self.failure_interval_std)
+        return np.random.uniform(self.failure_interval_mean, self.failure_interval_std)
     
     def _generate_recovery_time(self) -> float:
         """Generate channel recovery time"""
-        return np.random.normal(self.recovery_interval_mean, self.recovery_interval_std)
+        return np.random.uniform(self.recovery_interval_mean, self.recovery_interval_std)
 
  
 if __name__ == "__main__":
      
-    sim = Model(t_mod=1000, params={})
+    sim = Model(t_mod=1000, params={
+        'arrival_mean': 9,
+        'arrival_std': 4,
+        'transmission_mean': 7, 
+        'transmission_std': 3,
+        'failure_mean': 200,
+        'failure_std': 35,
+        'recovery_mean': 23,
+        'recovery_std': 7
+    })
     sim.run()
-    
      
     sim.statistics.print_report()

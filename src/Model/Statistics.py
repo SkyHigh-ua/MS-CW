@@ -20,7 +20,6 @@ class Statistics:
         self.failures = simulation.failures
         self.max_queue_length = simulation.queue.max_length
         
-         
         self.channels_utilization = {
             'main': len(simulation.main_channel.messages_processed) / simulation.messages_generated,
             'reserve': len(simulation.reserve_channel.messages_processed) / simulation.messages_generated
