@@ -26,24 +26,37 @@ def collect_statistics_over_time(t_mod: float, sample_points: int = 100) -> Dict
         
         while model.current_time < t_mod and current_index < sample_points:
             while model.current_time < next_sample_time and model.current_time < t_mod:
-                model.run_to_next_event()
-            if model.messages_generated > 0:
-                main_util = (len(model.main_channel.messages_processed) / 
-                           model.messages_generated)
-                reserve_util = (len(model.reserve_channel.messages_processed) / 
-                              model.messages_generated)
+                next_time = model._find_next_event_time()
+
+                if next_time == float('inf'):
+                    break
+                    
+                model.current_time = next_time
+                
+                model._process_outputs()
+                
+                while model._process_enabled_transitions():
+                    pass
+            if model.positions['P1'].total_tokens > 0:
+                main_util = (len([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'main']) / 
+                           model.positions['P1'].total_tokens)
+                reserve_util = (len([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'reserve']) / model.positions['P1'].total_tokens)
             else:
                 main_util = reserve_util = 0
                 
-            transmission_times = [msg.get_transmission_time() 
-                               for msg in (model.main_channel.messages_processed + 
-                                         model.reserve_channel.messages_processed)]
+            transmission_times = [msg 
+                               for msg in ([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'reserve'] + 
+                                         [r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'main'])]
             avg_time = np.mean(transmission_times) if transmission_times else 0
             
             stats['main_channel_utilization'][current_index] += main_util / n_runs
             stats['reserve_channel_utilization'][current_index] += reserve_util / n_runs
             stats['avg_transmission_time'][current_index] += avg_time / n_runs
-            stats['queue_length'][current_index] += len(model.queue) / n_runs
+            stats['queue_length'][current_index] += (model.positions['P2'].max_tokens + model.positions['P3'].max_tokens + model.positions['P4'].max_tokens) / n_runs
             
             current_index += 1
             next_sample_time += time_step

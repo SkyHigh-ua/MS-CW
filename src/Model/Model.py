@@ -1,25 +1,13 @@
-import numpy as np
 from typing import Dict, Any
-from Channel import Channel
-from Queue import Queue
+import numpy as np
+from Position import Position 
+from Transition import Transition
 from Statistics import Statistics
-from Message import Message
+from Record import TransmissionRecord
 
 class Model:
-    """Main simulation class"""
+    """Petri net simulation model"""
     def __init__(self, t_mod: float, params: Dict[str, Any]):
-        self.current_time = 0
-        self.t_mod = t_mod
-        
-        self.main_channel = Channel("Main")
-        self.reserve_channel = Channel("Reserve")
-        self.queue = Queue()
-        
-        self.messages_generated = 0
-        self.failures = 0
-        self.failure_times: list[int] = [] 
-        self.statistics = Statistics()
-        
         self.message_arrival_mean = params.get('arrival_mean', 9)
         self.message_arrival_std = params.get('arrival_std', 4)
         self.message_transmission_mean = params.get('transmission_mean', 7) 
@@ -29,180 +17,155 @@ class Model:
         self.recovery_interval_mean = params.get('recovery_mean', 23)
         self.recovery_interval_std = params.get('recovery_std', 7)
         
-        self.next_message = self._generate_arrival_time()
-        self.next_failure = self._generate_failure_time()
-        self.next_reserve = float('inf')
+        self.current_time = 0
+        self.t_mod = t_mod
+        
+        self.positions = self._create_positions()
+        
+        self.transitions = self._create_transitions(params)
+        
+        self.statistics = Statistics()
+        
+        self.transitions['T1'].output_times.add(self._generate_arrival_time())
+        self.transitions['T7'].output_times.add(self._generate_failure_time())
         
     def run(self):
         """Run simulation"""
         while self.current_time < self.t_mod:
-            next_time = min(
-                self.next_message,
-                self.next_failure,
-                self.next_reserve,
-                self.main_channel.transmission_end,
-                self.main_channel.recovery_time,
-                self.reserve_channel.transmission_end
-            )
-            
+            next_time = self._find_next_event_time()
+
+            if next_time == float('inf'):
+                break
+                
             self.current_time = next_time
             
-            if self.current_time == self.next_message:
-                self._process_message_arrival()
-                
-            if self.current_time == self.next_failure:
-                self._process_channel_failure()
-                
-            if self.current_time == self.next_reserve:
-                self._process_reserve_activation()
+            self._process_outputs()
             
-            if self.current_time == self.main_channel.recovery_time:
-                self._process_channel_recovery()
-                
-            if self.current_time == self.main_channel.transmission_end:
-                self._process_main_transmission_end()
-                
-            if self.current_time == self.reserve_channel.transmission_end:
-                self._process_reserve_transmission_end()
+            while self._process_enabled_transitions():
+                pass
             
         self.statistics.update(self)
-        
-    def run_to_next_event(self):
-        """Run until next event"""
-        next_time = min(
-            self.next_message,
-            self.next_failure,
-            self.next_reserve,
-            self.main_channel.transmission_end,
-            self.main_channel.recovery_time,
-            self.reserve_channel.transmission_end
-        )
-        
-        self.current_time = next_time
-        
-        if self.current_time == self.next_message:
-            self._process_message_arrival()
-            
-        if self.current_time == self.next_failure:
-            self._process_channel_failure()
-
-        if self.current_time == self.next_reserve:
-            self._process_reserve_activation()
-            
-        if self.current_time == self.main_channel.recovery_time:
-            self._process_channel_recovery()
-            
-        if self.current_time == self.main_channel.transmission_end:
-            self._process_main_transmission_end()
-            
-        if self.current_time == self.reserve_channel.transmission_end:
-            self._process_reserve_transmission_end()
-        
-    def _process_message_arrival(self):
-        """Process new message arrival"""
-        message = Message(arrival_time=self.current_time)
-        self.messages_generated += 1
-        message.transmission_start = self.current_time
-        
-        if self.main_channel.is_free():
-            if self.reserve_channel.is_on():
-                self.reserve_channel.turn_off(self.current_time)
-            transmission_time = self._generate_transmission_time()
-            self.main_channel.start_transmission(
-                message, self.current_time, transmission_time
-            )
-        elif self.reserve_channel.is_free():
-            transmission_time = self._generate_transmission_time()
-            self.reserve_channel.start_transmission(
-                message, self.current_time, transmission_time
-            )
-        else:
-            self.queue.put(message)
-            
-        self.next_message = self.current_time + self._generate_arrival_time()
-        
-    def _process_channel_failure(self):
-        """Process main channel failure"""
-        self.failures += 1
-        self.failure_times.append(self.current_time)
-        
-        if self.main_channel.is_busy():
-             
-            message = self.main_channel.interrupt(self.current_time)
-            if message:
-                message.transmission_start = self.current_time
-                self.queue.put_first(message)
-            
-        self.next_reserve = self.current_time + 2
-        
-        self.main_channel.fail(self.current_time)
-        
-        recovery_time = self._generate_recovery_time()
-        self.main_channel.schedule_recovery(self.current_time + recovery_time)
-        
-        self.next_failure = float('inf')
-        
-    def _process_reserve_activation(self):
-        """Process reserve channel activation"""
-        self.reserve_channel.recover(self.current_time)
-        
-        self.next_reserve = float('inf')
-        
-    def _process_channel_recovery(self):
-        """Process main channel recovery"""
-        self.main_channel.recover(self.current_time)
-        self.next_failure = self.current_time + self._generate_failure_time()
-        
-        if self.queue:
-            message = self.queue.get()
-            if message:
-                transmission_time = self._generate_transmission_time()
-                self.main_channel.start_transmission(
-                    message, self.current_time, transmission_time
-                )
-                
-    def _process_main_transmission_end(self):
-        """Process main channel transmission completion"""
-        self.main_channel.complete_transmission(self.current_time)
-        
-         
-        if self.queue:
-            message = self.queue.get()
-            if message:
-                transmission_time = self._generate_transmission_time()
-                self.main_channel.start_transmission(
-                    message, self.current_time, transmission_time
-                )
-                
-    def _process_reserve_transmission_end(self):
-        """Process reserve channel transmission completion"""
-        self.reserve_channel.complete_transmission(self.current_time)
-        
-        if self.queue:
-            message = self.queue.get()
-            if message:
-                transmission_time = self._generate_transmission_time()
-                self.reserve_channel.start_transmission(
-                    message, self.current_time, transmission_time
-                )
-        
-    def _generate_arrival_time(self) -> float:
-        """Generate message inter-arrival time"""
-        return np.random.uniform(self.message_arrival_mean, self.message_arrival_std)
     
-    def _generate_transmission_time(self) -> float:
-        """Generate message transmission time"""
-        return np.random.uniform(self.message_transmission_mean, self.message_transmission_std)
+    def _create_positions(self) -> Dict[str, Position]:
+        """Create initial positions"""
+        positions = {
+            'P1': Position('P1', 1),
+            'P2': Position('P2'),
+            'P3': Position('P3'),
+            'P4': Position('P4'),
+            'P5': Position('P5'),
+            'P6': Position('P6', 1),
+            'P7': Position('P7', 1),
+            'P8': Position('P8', 1),
+            'P9': Position('P9'),
+            'P10': Position('P10'),
+            'P11': Position('P11'), 
+            'P12': Position('P12'),
+        }
+        return positions
+
+    def _create_transitions(self, params: Dict[str, Any]) -> Dict[str, Transition]:
+        """Create transitions with their arcs"""
+        transitions = {
+            'T1': Transition('T1',
+                            input_arcs={'P1': (1, False)},
+                            output_arcs={'P2': 1, 'P1': 1},
+                            delay=lambda: max(0, np.random.normal(self.message_arrival_mean, self.message_arrival_std))),
+            
+            'T2': Transition('T2',
+                            input_arcs={'P2': (1, False), 'P8': (1, True)},
+                            output_arcs={'P3': 1}),
+            
+            'T3': Transition('T3',
+                            input_arcs={'P2': (1, False), 'P11': (1, True)},
+                            output_arcs={'P4': 1}),
+            
+            'T4': Transition('T4',
+                            input_arcs={'P3': (1, False), 'P6': (1, False), 'P8': (1, True)},
+                            output_arcs={'P5': 1, 'P6': 1},
+                            delay=lambda: max(0, np.random.normal(self.message_transmission_mean, self.message_transmission_std)),
+                            priority=1,
+                            on_start=lambda t: self._start_transmission(t, 'main'),
+                            on_complete=lambda t,r: self._complete_transmission(t,r)),
+            
+            'T5': Transition('T5', 
+                            input_arcs={'P4': (1, False), 'P6': (1, False)},
+                            output_arcs={'P5': 1, 'P6': 1},
+                            delay=lambda: max(0, np.random.normal(self.message_transmission_mean, self.message_transmission_std)),
+                            on_start=lambda t: self._start_transmission(t, 'reserve'),
+                            on_complete=lambda t,r: self._complete_transmission(t,r)),
+            
+            'T6': Transition('T6',
+                            input_arcs={'P3': (1, False), 'P8': (0, True)},
+                            output_arcs={'P2': 1}),
+            
+            'T7': Transition('T7',
+                            input_arcs={'P7': (1, False)},
+                            output_arcs={'P10': 1, 'P9': 1, 'P7': 1},
+                            delay=lambda: max(0, np.random.normal(self.failure_interval_mean, self.failure_interval_std)),
+                            on_start=lambda t: self.statistics.failure_times.append(t)),
+            
+            'T9': Transition('T9', 
+                            input_arcs={'P10': (1, False), 'P8': (1, False)},
+                            output_arcs={'P12': 1},
+                            delay=lambda: max(0, np.random.normal(self.recovery_interval_mean, self.recovery_interval_std))),
+            
+            'T8': Transition('T8', 
+                            input_arcs={'P9': (1, False)},
+                            output_arcs={'P11': 1},
+                            delay=lambda: 2),        
+            
+            'T10': Transition('T10',
+                            input_arcs={'P11': (1, False), 'P12': (1, False)},
+                            output_arcs={'P8': 1}),
+        }
+        return transitions
+    
+    def _find_next_event_time(self) -> float:
+        """Find time of next transition output"""
+        times = []
+        for t in self.transitions.values():
+            times.extend(t.output_times)
+        return min(times) if times else float('inf')
+    
+    def _process_outputs(self):
+        """Process all transition outputs at current time"""
+        for t in self.transitions.values():
+            if self.current_time in t.output_times:
+                t.output_times.remove(self.current_time)
+                t.fire_output(self.positions, self.current_time)
+    
+    def _process_enabled_transitions(self) -> bool:
+        """Process one enabled transition, return True if any were enabled"""
+        sorted_transitions = sorted(
+            self.transitions.values(), 
+            key=lambda t: (-t.priority, t.name)
+        )
+        for t in sorted_transitions:
+            if t.is_enabled(self.positions, self.transitions):
+                t.fire_input(self.positions, self.current_time)
+                return True
+        return False
+    
+    def _generate_arrival_time(self) -> float:
+        """Generate next message arrival time"""
+        return self.current_time + np.random.normal(self.message_arrival_mean, self.message_arrival_std)
     
     def _generate_failure_time(self) -> float:
-        """Generate time until next failure"""
-        return np.random.uniform(self.failure_interval_mean, self.failure_interval_std)
+        """Generate next failure time"""
+        return self.current_time + np.random.normal(self.failure_interval_mean, self.failure_interval_std)
     
-    def _generate_recovery_time(self) -> float:
-        """Generate channel recovery time"""
-        return np.random.uniform(self.recovery_interval_mean, self.recovery_interval_std)
+    def _start_transmission(self, time: float, channel: str):
+        """Record start of transmission"""
+        record = TransmissionRecord(start_time=time, channel=channel)
+        self.statistics.add_transmission(record)
+        return record
 
- 
+    def _complete_transmission(self, time: float, record: TransmissionRecord):
+        """Record completion of transmission"""
+        record.end_time = time
+        record.completed = True
+        
 if __name__ == "__main__":
      
     sim = Model(t_mod=1000, params={

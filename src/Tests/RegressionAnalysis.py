@@ -56,31 +56,28 @@ class RegressionAnalysis:
         self.y = np.array(y_data)
 
     def analyze_transmission_times(self):
-        times = np.array(self.transmission_times)
+        times = np.array(self.transmission_times)    
         mean = np.mean(times)
         std = np.std(times)
         
         plt.figure(figsize=(10,6))
-        hist, bin_edges, _ = plt.hist(times, bins='auto', density=True, 
-            alpha=0.7, color='skyblue', label='Observed')
+        hist, bin_edges, _ = plt.hist(times, bins='auto', density=True,
+                                alpha=0.7, color='skyblue', label='Observed')
         
-        bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
+        bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2    
+        expected = stats.norm.pdf(bin_centers, mean, std)
         
-        lmbda = 1/mean
-        expected = stats.expon.pdf(bin_centers, scale=lmbda)
-    
         observed_normalized = hist / np.sum(hist)
         expected_normalized = expected / np.sum(expected)
         
         chi2_stat, p_value = stats.chisquare(observed_normalized, expected_normalized)
         
         x = np.linspace(min(times), max(times), 100)
-        y = lmbda * np.exp(-lmbda * x)
-        y = y / sum(y * (x[1] - x[0]))
+        y = stats.norm.pdf(x, mean, std)
         plt.plot(x, y, 'r-', linewidth=2, 
-                label=f'Exponential fit\nλ={lmbda:.3f}')
+                label=f'Normal fit\nμ={mean:.2f}, σ={std:.2f}')
         
-        plt.title(f'Distribution of Message Transmission Times\n')
+        plt.title('Distribution of Message Transmission Times')
         plt.xlabel('Time')
         plt.ylabel('Density')
         plt.legend()
@@ -90,7 +87,7 @@ class RegressionAnalysis:
         print("\nTransmission Time Analysis:")
         print(f"Sample size: {len(times)}")
         print(f"Mean: {mean:.2f}")
-        print(f"Standard deviation: {std:.2f}") 
+        print(f"Standard deviation: {std:.2f}")
         print(f"Chi-square statistic: {chi2_stat:.2f}")
         print(f"p-value: {p_value:.3f}")
         

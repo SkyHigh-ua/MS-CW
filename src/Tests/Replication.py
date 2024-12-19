@@ -25,7 +25,8 @@ def calculate_required_replications(
         'main_channel_utilization': [],
         'reserve_channel_utilization': [],
         'avg_transmission_time': [],
-        'queue_length': []
+        'queue_length': [],
+        'fail_rate': []
     }
     
     print(f"\nRunning {n_preliminary} preliminary experiments...")
@@ -35,23 +36,28 @@ def calculate_required_replications(
         model.run()
         
          
-        if model.messages_generated > 0:
-            main_util = (len(model.main_channel.messages_processed) / 
-                        model.messages_generated)
-            reserve_util = (len(model.reserve_channel.messages_processed) / 
-                          model.messages_generated)
+        if model.positions['P1'].total_tokens > 0:
+            main_util = (len([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'main']) / 
+                        model.positions['P1'].total_tokens)
+            reserve_util = (len([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'reserve']) / 
+                          model.positions['P1'].total_tokens)
         else:
             main_util = reserve_util = 0
             
-        transmission_times = [msg.get_transmission_time() 
-                            for msg in (model.main_channel.messages_processed + 
-                                      model.reserve_channel.messages_processed)]
+        transmission_times = [msg 
+                               for msg in ([r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'reserve'] + 
+                                         [r.transmission_time for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'main'])]
         avg_time = np.mean(transmission_times) if transmission_times else 0
         
         metrics_data['main_channel_utilization'].append(main_util)
         metrics_data['reserve_channel_utilization'].append(reserve_util)
         metrics_data['avg_transmission_time'].append(avg_time)
-        metrics_data['queue_length'].append(len(model.queue))
+        metrics_data['queue_length'].append((model.positions['P2'].max_tokens + model.positions['P3'].max_tokens + model.positions['P4'].max_tokens))
+        metrics_data['fail_rate'].append(model.positions['P7'].total_tokens)
     
      
     results = {}

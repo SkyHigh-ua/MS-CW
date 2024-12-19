@@ -12,13 +12,14 @@ class ExperimentResult:
     avg_transmission_time: float
     avg_queue_length: float
     failure_rate: float
+    failure_times: List[float]
 
 class ExperimentRunner:
     """Class for running simulation experiments"""
     def __init__(self, 
                  t_mod: float = 1000,
                  warmup_period: float = 600,
-                 num_replications: int = 5200,
+                 num_replications: int = 150,
                  params: Dict[str, float] = None):
         
         self.t_mod = t_mod
@@ -42,10 +43,10 @@ class ExperimentRunner:
     def _calculate_statistics(self, model) -> ExperimentResult:
         """Calculate statistics for a single experiment"""
          
-        main_messages = [msg for msg in model.main_channel.messages_processed 
-                        if msg.transmission_start >= self.warmup_period]
-        reserve_messages = [msg for msg in model.reserve_channel.messages_processed 
-                          if msg.transmission_start >= self.warmup_period]
+        main_messages = [r for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'main' and r.start_time >= self.warmup_period]
+        reserve_messages = [r for r in model.statistics.transmission_records 
+                         if r.completed and r.channel == 'reserve' and r.start_time >= self.warmup_period]
         
          
         total_time = self.t_mod - self.warmup_period
@@ -55,13 +56,13 @@ class ExperimentRunner:
         reserve_utilization = len(reserve_messages) / total_messages if total_messages > 0 else 0
         
         transmission_times = [
-                            msg.get_transmission_time()
-                            for msg in main_messages + reserve_messages if msg.transmitted
+                            msg.transmission_time
+                            for msg in main_messages + reserve_messages if msg.completed
                             ]
         avg_transmission = np.mean(transmission_times) if transmission_times else 0
         
         failure_times = [
-            time for time in model.failure_times
+            time for time in model.statistics.failure_times
             if time >= self.warmup_period
         ]
         failure_rate = len(failure_times) / total_time
@@ -71,8 +72,9 @@ class ExperimentRunner:
             reserve_channel_utilization=reserve_utilization, 
             transmission_times=transmission_times,
             avg_transmission_time=avg_transmission,
-            avg_queue_length=model.queue.max_length,
-            failure_rate=failure_rate 
+            avg_queue_length=model.positions['P3'].max_tokens + model.positions['P4'].max_tokens,
+            failure_rate=failure_rate,
+            failure_times=failure_times
         )
         
     def get_confidence_intervals(self, confidence: float = 0.95) -> Dict[str, Dict[str, float]]:

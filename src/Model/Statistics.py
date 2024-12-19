@@ -1,78 +1,77 @@
+import numpy as np
+from Record import TransmissionRecord
+
 class Statistics:
     """Class for collecting simulation statistics"""
     def __init__(self):
         self.total_messages = 0
         self.transmitted_messages = 0
         self.failures = 0
-        self.transmission_times = []
+        self.failure_times = []
         self.max_queue_length = 0
         self.channels_utilization = {}
         self.main_channel_failure_rate = 0
-        self.transmission_statistics = {}
-        
-    def update(self, simulation):
-        """Update statistics from simulation state"""
-        self.total_messages = simulation.messages_generated
-        self.transmitted_messages = (
-            simulation.main_channel.messages_processed + 
-            simulation.reserve_channel.messages_processed
-        )
-        self.failures = simulation.failures
-        self.max_queue_length = simulation.queue.max_length
-        
-        self.channels_utilization = {
-            'main': len(simulation.main_channel.messages_processed) / simulation.messages_generated,
-            'reserve': len(simulation.reserve_channel.messages_processed) / simulation.messages_generated
+        self.transmission_records: List[TransmissionRecord] = []
+        self.transmission_statistics = {
+            'mean': 0,
+            'std_dev': 0,
+            'min': 0,
+            'max': 0
         }
         
-        self.main_channel_failure_rate = simulation.failures / simulation.t_mod
-
-         
-        self.transmission_times = [
-            t for t in [
-                msg.get_transmission_time()
-                for msg in simulation.main_channel.messages_processed + simulation.reserve_channel.messages_processed
-            ] if t > 0
-        ]
-        self.transmission_statistics = self._calculate_transmission_statistics()
+    def add_transmission(self, record: TransmissionRecord):
+        """Add transmission record"""
+        self.transmission_records.append(record)
         
-    
+    def update(self, model: any):
+        """Update statistics from model state"""
+        total_time = model.current_time
+        for pos in model.positions.values():
+            pos.update_busy_time(total_time)
+            
+        self.total_messages = model.positions['P1'].total_tokens
+        self.transmitted_messages = model.positions['P5'].tokens
+        self.failures = model.positions['P7'].total_tokens
+        self.max_queue_length = model.positions['P2'].max_tokens
+        
+        self.channels_utilization = {
+            'main': len([r.transmission_time for r in self.transmission_records 
+                         if r.completed and r.channel == 'main']) / self.transmitted_messages,
+            'reserve': len([r.transmission_time for r in self.transmission_records 
+                         if r.completed and r.channel == 'reserve']) / self.transmitted_messages
+        }
+        
+        self.max_queue_length = model.positions['P3'].max_tokens + model.positions['P4'].max_tokens
+        self.main_channel_failure_rate = self.failures / total_time if total_time > 0 else 0
+        
+        self._calculate_transmission_statistics()
+        
     def _calculate_transmission_statistics(self):
         """Calculate statistical characteristics of transmission times"""
-        if not self.transmission_times:
-            return {
-                'mean': 0,
-                'std_dev': 0,
-                'min': 0,
-                'max': 0,
-            }
-
-        n = len(self.transmission_times)
-        mean = sum(self.transmission_times) / n
-        variance = sum((t - mean) ** 2 for t in self.transmission_times) / (n - 1)
-        std_dev = variance ** 0.5
-        min_time = min(self.transmission_times)
-        max_time = max(self.transmission_times)
-
-        return {
-            'mean': mean,
-            'std_dev': std_dev,
-            'min': min_time,
-            'max': max_time,
+        completed_times = [r.transmission_time for r in self.transmission_records 
+                         if r.completed and r.transmission_time > 0]
+        
+        if not completed_times:
+            return
+            
+        self.transmission_statistics = {
+            'mean': np.mean(completed_times),
+            'std_dev': np.std(completed_times),
+            'min': np.min(completed_times),
+            'max': np.max(completed_times)
         }
         
     def print_report(self):
         """Print simulation statistics report"""
         print("\nSimulation Statistics:")
-        print(f"Total messages generated: {self.total_messages}")
-        print(f"Messages transmitted: {len(self.transmitted_messages)}")
-        print(f"Channel failures: {self.failures}")
+        print(f"Total messages: {self.total_messages}")
+        print(f"Transmitted messages: {self.transmitted_messages}")
+        print(f"Failures: {self.failures}")
         print(f"Max queue length: {self.max_queue_length}")
         print("\nChannel utilization:")
         for channel, util in self.channels_utilization.items():
             print(f"{channel}: {util:.2%}")
-
-        print(f"\nMain channel failure rate: {self.main_channel_failure_rate:.6f} failures per time unit")
+        print(f"\nMain channel failure rate: {self.main_channel_failure_rate:.6f}")
         print("\nTransmission time statistics:")
         print(f"  Mean: {self.transmission_statistics['mean']:.2f}")
         print(f"  Std. Dev.: {self.transmission_statistics['std_dev']:.2f}")
